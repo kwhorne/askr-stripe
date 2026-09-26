@@ -49,9 +49,18 @@ version it pins through `askr mcp`, as `stripe/billing.md` and
 Each of these was mutation-checked: the check removed, and the suite
 required to fail.
 
-**Not yet: a run against a real Stripe account.** None of the above is
-Stripe itself. Until a test-mode account has taken a checkout and sent its
-webhooks here, this line stays.
+**Against a real Stripe account, in test mode** (2026-09-26):
+`./check --testmode` serves the app with `stripe listen` beside it, so the
+account's own events, signed by Stripe, reach the webhook. A customer,
+Checkout, the portal, a subscription paid by a test card, cancel, resume,
+end, a trial and a declined card: fifteen events, each answered 200 and
+recorded once, on API version `2026-08-26.dahlia`. That run found a bug
+nothing else could -- a customer's idempotency key made of the user id,
+which Stripe kept for a day and answered with a customer that had been
+deleted -- and it is fixed.
+
+**Not proven:** live mode, a real card, and a Checkout page completed by a
+person. Test mode takes test cards only, and Checkout's page is a browser.
 
 ## Running the suite
 
@@ -59,6 +68,7 @@ webhooks here, this line stays.
 ./check            # needs Docker and a checkout of Askr at ../askrcode
 ./check --checks   # with range, overflow and I/O checks
 ./check --app      # the plugin inside a new --auth app
+STRIPE_SECRET=sk_test_... ./check --testmode   # against your test account
 ```
 
 `ASKR_PATH` points at another checkout. The suite builds in the

@@ -7,6 +7,9 @@
 #                        I/O checks, as the framework's ./askr check
 #   ./check --app        the plugin in a new --auth app: plugin add from a
 #                        tag, build, migrate, a signed webhook over HTTP
+#   ./check --testmode   against a real Stripe account in test mode, with
+#                        stripe listen forwarding its events; needs
+#                        STRIPE_SECRET=sk_test_... in the environment
 #
 # ASKR_PATH is a checkout of the framework, ../askrcode by default. The
 # image is the framework's own, askr-fpc:bookworm, built from its
@@ -34,6 +37,9 @@ fi
 
 if [ "${1:-}" = "--app" ]; then
   exec "$HERE/tools/app-check.sh" "$ASKR"
+fi
+if [ "${1:-}" = "--testmode" ]; then
+  exec "$HERE/tools/testmode.sh" "$ASKR"
 fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then

@@ -54,6 +54,20 @@ if [ ! -f "$HERE/$ws/shop/askr.toml" ]; then
   bad "a new --auth app" "$(echo "$out" | tail -4)"
   exit 1
 fi
+# Docker Desktop's mount cache can hand the container a file written on
+# the host a moment ago at its old length: the copy then ends mid-line and
+# the build fails on a unit that is fine. Compare, and copy again.
+for try in 1 2 3; do
+  same=1
+  for f in $(cd "$HERE" && find src database docs -type f); do
+    [ "$(wc -c < "$HERE/$f")" = "$(wc -c < "$HERE/$ws/askr-stripe/$f" 2>/dev/null)" ] || same=0
+  done
+  [ $same -eq 1 ] && break
+  sleep 1
+  in_box "cd askr-stripe && rm -rf src database docs && cp -r /plugin/src /plugin/database /plugin/docs . &&
+    $gitc add -A && $gitc commit -qm again && git tag -f v0.1.0 >/dev/null" > /dev/null 2>&1
+done
+[ $same -eq 1 ] || { bad "the plugin is copied whole" "the container keeps seeing old file sizes"; exit 1; }
 sed -i.bak 's|^version = .*|path = "/askr"|; s|^path = .*|path = "/askr"|' "$HERE/$ws/shop/askr.toml"
 sed -i.bak 's|^DATABASE_URL=.*|DATABASE_URL=sqlite:storage/check.sqlite|' "$HERE/$ws/shop/.env"
 rm -f "$HERE/$ws/shop/"*.bak

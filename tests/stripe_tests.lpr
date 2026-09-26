@@ -506,8 +506,10 @@ begin
   AssertEqual(GFake.Last.Url, DefaultStripeBaseUrl + '/v1/customers', 'the path');
   AssertContains(GFake.Last.Form, 'metadata%5Baskr_user_id%5D=7',
     'the user id goes along, the way back from Stripe''s side');
-  AssertEqual(GFake.Last.IdempotencyKey, 'askr-customer-7',
-    'keyed by the user, so two requests racing make one customer');
+  AssertTrue((Copy(GFake.Last.IdempotencyKey, 1, 5) = 'askr-') and
+    (Length(GFake.Last.IdempotencyKey) = 37),
+    'a random key, not one made of the user id: Stripe keeps a key for a ' +
+    'day across every app that shares the account');
   AssertEqual(Scalar('SELECT stripe_id FROM stripe_customers WHERE user_id = ''7'''),
     'cus_new', 'and kept');
 
@@ -515,6 +517,29 @@ begin
     'the second time it is read');
   AssertEqual(GFake.SentCount, 1, 'without asking Stripe again');
   AssertEqual(StripeCustomerId('8'), '', 'another user has none');
+end;
+
+procedure OtherRequestWins;
+begin
+  GFake.BeforeReply := nil;
+  Customer('7', 'cus_first');
+end;
+
+{ Two requests make a customer for the same user at once. The row decides,
+  and the loser deletes the customer it made in Stripe. }
+procedure TestCustomerRace;
+begin
+  Fresh;
+  GFake.Queue('{"id":"cus_second","object":"customer"}');
+  GFake.Queue('{"id":"cus_second","object":"customer","deleted":true}');
+  GFake.BeforeReply := OtherRequestWins;
+  AssertEqual(EnsureStripeCustomer('7', 'ada@example.com'), 'cus_first',
+    'the row that was there first');
+  AssertEqual(GFake.SentCount, 2, 'the customer, and one call more');
+  AssertEqual(GFake.Last.Method, 'DELETE', 'which deletes');
+  AssertEqual(GFake.Last.Url, DefaultStripeBaseUrl + '/v1/customers/cus_second',
+    'the customer that lost');
+  AssertEqual(Count('SELECT count(*) FROM stripe_customers'), 1, 'one row');
 end;
 
 procedure TestCheckout;
@@ -927,6 +952,7 @@ begin
   Test('the headers on the wire', @TestOnTheWire);
   Group('billing');
   Test('one customer per user', @TestCustomerOnce);
+  Test('two requests racing: one customer kept, the other deleted', @TestCustomerRace);
   Test('a checkout', @TestCheckout);
   Test('the portal', @TestPortal);
   Test('cancel applies the reply at once', @TestCancelAppliesReply);

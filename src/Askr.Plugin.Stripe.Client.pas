@@ -120,13 +120,17 @@ type
     Form: string;
   end;
 
-  { Answers with what has been queued, and keeps what it was asked. }
+  { Answers with what has been queued, and keeps what it was asked.
+    BeforeReply runs before each answer: a test puts the other side of a
+    race there. }
   TFakeStripeHttp = class(TStripeHttp)
   private
     FReplies: array of TStripeReply;
     FNext: Integer;
     FSent: array of TStripeSent;
+    FBeforeReply: TProcedure;
   public
+    property BeforeReply: TProcedure read FBeforeReply write FBeforeReply;
     procedure Queue(const Body: string; Status: Integer = 200;
       const ShouldRetry: string = '');
     function Send(const Method, Url, Secret, IdempotencyKey,
@@ -304,6 +308,8 @@ begin
   FSent[High(FSent)].Secret := Secret;
   FSent[High(FSent)].IdempotencyKey := IdempotencyKey;
   FSent[High(FSent)].Form := Form;
+  if Assigned(FBeforeReply) then
+    FBeforeReply();
   if FNext > High(FReplies) then
     raise EStripeError.Create(0, 'fake', '', '', '', '',
       'The fake Stripe has no more queued replies.', False);

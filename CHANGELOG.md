@@ -6,8 +6,8 @@ The first release.
 
 ### Added
 
-- A Stripe customer per user, keyed by the user id as text, made once
-  with the user id as its idempotency key.
+- A Stripe customer per user, keyed by the user id as text, made once;
+  when two requests race, the loser deletes the customer it made.
 - Checkout for subscriptions -- with a trial, several prices, promotion
   codes -- and for one-off payments.
 - The customer portal.
@@ -24,8 +24,14 @@ The first release.
 - Stripe-Version pinned to `2026-08-26.dahlia`, and an Idempotency-Key on
   every POST.
 
-### Not yet
+### Held to
 
-- A run against a real Stripe account. The suite holds the plugin to
-  stripe-python's signature verdicts, to stripe-mock and to a raw socket,
-  none of which is Stripe.
+- stripe-python's verdicts on thirty Stripe-Signature headers, stripe-mock,
+  the bytes on a raw socket, and a new `--auth` app taking a signed webhook
+  over HTTP.
+- A real Stripe account in test mode, with `stripe listen` forwarding its
+  events: fifteen, each answered and recorded once.
+
+### Not proven
+
+- Live mode, a real card, and a Checkout page completed in a browser.

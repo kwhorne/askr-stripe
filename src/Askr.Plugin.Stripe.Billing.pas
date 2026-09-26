@@ -152,8 +152,9 @@ function PaymentCheckout(const Price: string; Quantity: Integer;
 
 { The user's Stripe customer id, or ''. }
 function StripeCustomerId(const UserId: string): string;
-{ The user's Stripe customer, made the first time. The idempotency key is
-  the user id, so two requests racing to make one make one. }
+{ The user's Stripe customer, made the first time. Two requests racing to
+  make one can both make one in Stripe; the row decides, and the loser
+  deletes its own. }
 function EnsureStripeCustomer(const UserId, Email: string;
   const Name: string = ''): string;
 
@@ -395,7 +396,12 @@ begin
   { The way back from Stripe's side: a customer made here says whose it
     is, in the dashboard and in every webhook about it. }
   P.Add('metadata[askr_user_id]', UserId);
-  Reply := Stripe.Post('/v1/customers', P, 'askr-customer-' + UserId);
+  { A random key, not one made from the user id. Stripe keeps a key for
+    24 hours across everything that shares the account, so a key of the
+    user id handed a deleted customer back to a database that had been
+    reset, and would hand user 7 of the staging app the customer of user
+    7 of the dev app. The first run against a real account found it. }
+  Reply := Stripe.Post('/v1/customers', P);
   Result := StripeField(Reply, 'id');
   if Result = '' then
     raise EStripeError.Create(0, 'api_error', '', '', '', Stripe.LastRequestId,
@@ -412,11 +418,12 @@ begin
     except
       on E: EDbError do
       begin
-        { Another request made the row first. With the same idempotency
-          key it got the same customer from Stripe, so its row is this
-          one -- read it rather than trust that. }
+        { Another request made the row first, with a customer of its
+          own. Theirs is kept; ours is deleted in Stripe, so the account
+          does not collect customers nobody points at. }
         if not E.IsUniqueViolation or Db.InTransaction then
           raise;
+        Stripe.Delete('/v1/customers/' + Result);
         Result := StripeCustomerId(UserId);
       end;
     end;

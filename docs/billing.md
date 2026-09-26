@@ -41,8 +41,9 @@ Customer := EnsureStripeCustomer(Askr.Auth.Id, Email, Name);
 
 The first call makes the customer in Stripe, with the user id in its
 metadata as `askr_user_id`, and keeps the id in `stripe_customers`; later
-calls read it. The idempotency key is the user id, so two requests racing
-to make one make one. You rarely call it yourself: a checkout does.
+calls read it. Two requests racing to make one can both make one in
+Stripe; the row decides, and the loser deletes its own. You rarely call it
+yourself: a checkout does.
 
 ## Checkout
 
