@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Builds and runs the suite in the framework's container, against
+# stripe-mock.
+#
+#   ./check              the suite
+#   ./check --checks     the same with -Cr -Co -Ci: range, overflow and
+#                        I/O checks, as the framework's ./askr check
+#   ./check --app        the plugin in a new --auth app: plugin add from a
+#                        tag, build, migrate, a signed webhook over HTTP
+#
+# ASKR_PATH is a checkout of the framework, ../askrcode by default. The
+# image is the framework's own, askr-fpc:bookworm, built from its
+# tools/Dockerfile.fpc: the plugin is compiled by the compiler an app
+# compiles it with.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+ASKR=$(cd "${ASKR_PATH:-$HERE/../askrcode}" 2>/dev/null && pwd) || {
+  echo "No Askr checkout at ${ASKR_PATH:-$HERE/../askrcode}. Set ASKR_PATH." >&2
+  exit 2
+}
+[ -f "$ASKR/src/runtime/Askr.Plugins.pas" ] || {
+  echo "$ASKR is not an Askr checkout with plugins (0.16 or later)." >&2
+  exit 2
+}
+IMAGE=askr-fpc:bookworm
+NET=askr-stripe-check
+MOCK=askr-stripe-mock
+
+EXTRA=""
+if [ "${1:-}" = "--checks" ]; then
+  EXTRA="-Cr -Co -Ci"
+fi
+
+if [ "${1:-}" = "--app" ]; then
+  exec "$HERE/tools/app-check.sh" "$ASKR"
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Building $IMAGE from the framework's tools/Dockerfile.fpc ..." >&2
+  docker build -f "$ASKR/tools/Dockerfile.fpc" -t "$IMAGE" "$ASKR/tools" >&2
+fi
+
+cleanup() {
+  docker rm -f "$MOCK" >/dev/null 2>&1 || true
+  docker network rm "$NET" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+cleanup
+docker network create "$NET" >/dev/null
+if ! docker run -d --name "$MOCK" --network "$NET" stripe/stripe-mock:latest >/dev/null; then
+  echo "stripe-mock would not start; the suite needs it." >&2
+  exit 2
+fi
+
+U=/askr/src
+FLAGS="-B -Sh -O2 -gl -vewn $EXTRA -Fu$U/cli -Fu$U/core -Fu$U/http -Fu$U/urd \
+  -Fu$U/norn -Fu$U/inertia -Fu$U/desktop -Fu$U/runtime -Fu$U/run \
+  -Fu/plugin/src -Fu/plugin/database -FU/plugin/.build/units -FE/plugin/.build/bin"
+
+# One container for the build and the run, so the binary it runs is the
+# one it just built -- and a build that fails stops here, rather than a
+# stale binary answering green.
+docker run --rm --network "$NET" \
+  -e STRIPE_MOCK_URL="http://$MOCK:12111" \
+  -v "$ASKR":/askr:ro -v "$HERE":/plugin -w /plugin "$IMAGE" sh -c "
+    mkdir -p .build/units .build/bin &&
+    fpc $FLAGS tests/stripe_tests.lpr > .build/fpc.log 2>&1 || {
+      grep -E 'Error|Fatal' .build/fpc.log; exit 3; }
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      (exec 3<>/dev/tcp/$MOCK/12111) 2>/dev/null && break; sleep 0.5; done 2>/dev/null
+    .build/bin/stripe_tests"
