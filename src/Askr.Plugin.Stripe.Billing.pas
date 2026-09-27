@@ -387,6 +387,7 @@ var
   A: TArena;
   P: TStripeParams;
   Reply: string;
+  Tx: TDbTransaction;
 begin
   if Trim(UserId) = '' then
     raise EStripeError.Create(0, 'config', '', '', '', '',
@@ -416,25 +417,32 @@ begin
 
   Db := NeedDb;
   A := TArena.Create(4096);
+  { In a transaction of its own -- a savepoint inside a caller's -- so a
+    unique violation here leaves a caller's transaction usable, which on
+    Postgres it otherwise does not. }
+  Tx := Db.Transaction;
   try
     try
       Db.ExecParams(A, 'INSERT INTO stripe_customers ' +
         '(user_id, stripe_id, created_at) VALUES (' + Ph(Db, A, 1) + ', ' +
         Ph(Db, A, 2) + ', ' + Ph(Db, A, 3) + ')',
         [DbParam(A, UserId), DbParam(A, Result), DbParam(A, UnixNow)]);
+      Tx.Commit;
     except
       on E: EDbError do
       begin
         { Another request made the row first, with a customer of its
           own. Theirs is kept; ours is deleted in Stripe, so the account
           does not collect customers nobody points at. }
-        if not E.IsUniqueViolation or Db.InTransaction then
+        if not E.IsUniqueViolation then
           raise;
+        Tx.Rollback;
         Stripe.Delete('/v1/customers/' + Result);
         Result := StripeCustomerId(UserId);
       end;
     end;
   finally
+    Tx.Finish;
     A.Free;
   end;
 end;
@@ -915,7 +923,7 @@ var
   ErrPos: SizeInt;
   Id, EventType: string;
   Created: Int64;
-  OwnTx: Boolean;
+  Tx: TDbTransaction;
   Received: TStripeEventReceived;
 begin
   A := TArena.Create(Length(Payload) * 4 + 16 * 1024);
@@ -930,9 +938,10 @@ begin
     if (Id = '') or (EventType = '') then
       raise EStripeWebhookError.Create('The event has no id or no type.');
 
-    OwnTx := not Db.InTransaction;
-    if OwnTx then
-      Db.StartTransaction;
+    { One unit of work: a transaction, or a savepoint inside one a caller
+      -- a test's sandbox -- has open. Finish rolls back whatever did not
+      reach the Commit, an Exit and an exception alike. }
+    Tx := Db.Transaction;
     try
       try
         Db.ExecParams(A, 'INSERT INTO stripe_events (stripe_id, type, ' +
@@ -946,9 +955,6 @@ begin
           if not E.IsUniqueViolation then
             raise;
           { Delivered before. Nothing happens twice. }
-          if OwnTx then
-            Db.Rollback;
-          OwnTx := False;
           Exit(woDuplicate);
         end;
       end;
@@ -961,13 +967,9 @@ begin
       Received.Payload := Payload;
       DispatchEvent(Received);
 
-      if OwnTx then
-        Db.Commit;
-      OwnTx := False;
-    except
-      if OwnTx then
-        Db.Rollback;
-      raise;
+      Tx.Commit;
+    finally
+      Tx.Finish;
     end;
   finally
     A.Free;

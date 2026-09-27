@@ -49,7 +49,10 @@ if [ "${have%.*}" != "${want%.*}" ]; then
   relax="sed -i 's/^askr = .*/askr = \"*\"/' askr-stripe/askr-plugin.toml &&"
 fi
 
-out=$(in_box "mkdir -p askr-stripe && cp -r /plugin/askr-plugin.toml /plugin/src \
+# The container clears what it is about to make, in the same call: a
+# directory removed on the host can still be there as the container sees
+# it, and askr new then refuses a directory that exists.
+out=$(in_box "rm -rf askr-stripe shop cache && mkdir -p askr-stripe && cp -r /plugin/askr-plugin.toml /plugin/src \
     /plugin/database /plugin/docs askr-stripe/ && $relax
   (cd askr-stripe && git init -q && $gitc add -A && $gitc commit -qm s && git tag v$version) &&
   $askr_bin new shop --auth" 2>&1) || true

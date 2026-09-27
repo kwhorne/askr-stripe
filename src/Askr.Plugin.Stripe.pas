@@ -17,8 +17,10 @@
   line in the log, rather than accepting them unverified. A 500 makes
   Stripe try again later, so nothing is lost while it is being set.
 
-  The route is exempt from CSRF: Stripe cannot send a token, and the
-  signature is what CSRF would have been. }
+  The route is in a group without CSRF and without the app's rate limit:
+  Stripe cannot send a token, the signature is what CSRF would have been,
+  and one sender's burst of events should not spend every visitor's
+  allowance or be refused by it. }
 unit Askr.Plugin.Stripe;
 
 {$mode Delphi}{$H+}
@@ -28,7 +30,7 @@ interface
 uses
   SysUtils,
   Askr.Core.Text, Askr.Core.Config, Askr.Core.Clock, Askr.Core.Log,
-  Askr.Http.Router, Askr.Http.Request, Askr.Http.Response, Askr.Csrf,
+  Askr.Http.Router, Askr.Http.Request, Askr.Http.Response,
   Askr.Urd.Model, Askr.Plugins, Askr.Auth,
   Askr.Plugin.Stripe.Client, Askr.Plugin.Stripe.Signature,
   Askr.Plugin.Stripe.Billing;
@@ -140,8 +142,11 @@ end;
 
 procedure TStripePlugin.Routes(R: TRouter);
 begin
-  CsrfExempt(GPath);
-  R.Post(GPath, StripeWebhook);
+  { A group of one route: without CSRF, which Stripe cannot send and the
+    signature stands in for, and without the app's rate limit -- Stripe is
+    one sender with a burst of events, and should not share a bucket with
+    every visitor, nor have its retries refused by it. }
+  R.Group('').WithoutCsrf.WithoutRateLimit.Post(GPath, StripeWebhook);
 end;
 
 function StripeWebhook(Req: TRequest): TResponse;

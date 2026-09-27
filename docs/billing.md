@@ -7,7 +7,7 @@ and a webhook that keeps the app's copy of all of it in step with Stripe.
 
 It is a plugin, not part of the framework. Billing is not something every
 app needs, and Stripe changes on Stripe's schedule rather than Askr's. It
-builds against Askr 0.16 and later.
+builds against Askr 0.17 and later.
 
 **What the plugin never sees is a card.** Checkout and the portal are
 Stripe's own pages. The card, 3-D Secure and strong customer

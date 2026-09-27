@@ -1,6 +1,6 @@
 name = "stripe"
-version = "0.2.0"
-askr = "^0.16.0"
+version = "0.3.0"
+askr = "^0.17.0"
 entry = "Askr.Plugin.Stripe"
 units = "src"
 migrations = "database"

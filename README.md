@@ -19,7 +19,8 @@ Result := Redirect(CheckoutUrl(Askr.Auth.Id, Email,
 if Subscribed(Askr.Auth.Id, 'price_...') then ...
 ```
 
-It needs Askr 0.16 or later, the first release with plugins.
+It needs Askr 0.17 or later: plugins came in 0.16, and the route groups
+and nested transactions it uses in 0.17.
 
 ## Documentation
 

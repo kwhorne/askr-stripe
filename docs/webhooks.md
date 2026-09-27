@@ -59,8 +59,11 @@ recorded, so Stripe's retry is not taken for a duplicate. In live mode
 Stripe retries for up to three days; in test mode, a few times over a few
 hours. That is the queue: it needs nothing from your app.
 
-The route is exempt from CSRF. Stripe cannot send a token, and the
-signature is what the token would have proved.
+The route is in a group of its own, without CSRF and without your app's
+rate limit. Stripe cannot send a token, and the signature is what the
+token would have proved; and Stripe is one sender with a burst of events,
+which should neither spend every visitor's allowance nor have its retries
+refused by it.
 
 ## Order
 
@@ -149,8 +152,8 @@ nobody. Guessing would give it to the wrong person.
 post an event of its own through the real route. See
 [testing](testing.md).
 
-## Behind a rate limit
+## The rate limit
 
-A generated app limits each caller to 600 requests a minute, and Stripe is
-one caller. An app that takes a great many webhooks at once should raise
-the limit, or key it so Stripe's addresses do not share one bucket.
+The webhook is outside your app's rate limit: the group it is in says
+`WithoutRateLimit`. Nothing to do. A signature is what keeps anyone else
+out of it, and a bad one costs a 400 and nothing else.

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+Built on Askr 0.17's route groups and nested transactions, and needs it.
+
+### Changed
+
+- **The webhook is in a group without CSRF and without the app's rate
+  limit**, in place of `CsrfExempt`. Stripe is one sender with a burst of
+  events: it should not spend every visitor's allowance, nor have its
+  retries refused with a 429. A test drives the plugin's own `Routes`
+  behind a rate limit and requires the webhook through and a route beside
+  it refused; `./check --app` requires the webhook through CSRF.
+- **The webhook and a new customer's row use `C.Transaction`.** Inside a
+  caller's transaction -- a test's sandbox, say -- each is a savepoint, so
+  a duplicate event or a customer made twice rolls back only itself.
+  Before, a unique violation there left a caller's transaction aborted on
+  Postgres. The plugin's suite runs on SQLite, where it never was; what
+  holds this on Postgres is the framework's own test of `C.Transaction`.
+
 ## 0.2.0
 
 Documentation to build billing on, in the shape Laravel Cashier's has:

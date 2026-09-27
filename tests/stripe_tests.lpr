@@ -24,6 +24,7 @@ uses
   SysUtils, Classes, StrUtils, Sockets, BaseUnix, Askr.Core.Arena,
   Askr.Core.Text, Askr.Core.Clock, Askr.Core.Crypto, Askr.Core.Log,
   Askr.Http.Router, Askr.Http.Request, Askr.Http.Response, Askr.Auth,
+  Askr.Http.RateLimit,
   Askr.Urd.Driver, Askr.Urd.Model,
   Askr.Urd.Sqlite, Askr.Norn.Migration, Askr.Events, Askr.Testing,
   Askr.Plugin.Stripe, Askr.Plugin.Stripe.Client,
@@ -830,6 +831,58 @@ begin
   AssertEqual(R.HeaderValue('X-Inertia-Location'), '/pricing', 'with the location');
 end;
 
+type
+  TOther = class
+    class function Ping(Req: TRequest): TResponse;
+  end;
+
+class function TOther.Ping(Req: TRequest): TResponse;
+begin
+  Result := RespondText('pong');
+end;
+
+{ The plugin's own Routes, behind the app's rate limit: the webhook is in
+  a group without it, and a route beside it is not. }
+procedure TestWebhookOutsideTheRateLimit;
+var
+  R: TRouter;
+  Plugin: TStripePlugin;
+  C: TTestClient;
+  Body: string;
+  I: Integer;
+begin
+  Fresh;
+  Customer('7', 'cus_A');
+  FakeEvents([]);
+  R := TRouter.Create;
+  Plugin := TStripePlugin.Create;
+  C := TTestClient.Create(R);
+  try
+    Plugin.Routes(R);
+    R.Get('/other', TOther.Ping);
+    UseRateLimit(R);
+    RateLimit.PerMinute(60).Burst(1);
+    RateLimit.Clear;
+
+    AssertStatus(C.Get('/other'), 200, 'the app''s bucket');
+    AssertStatus(C.Get('/other'), 429, 'empties');
+    for I := 1 to 3 do
+    begin
+      Body := Event('evt_rl_' + IntToStr(I), 'customer.subscription.updated',
+        UnixNow, Sub('sub_1', 'active', ['price_pro'], 0, 0, False));
+      AssertStatus(C.WithHeader('Stripe-Signature',
+          StripeSignatureHeader(Body, WebhookSecret, UnixNow))
+        .Post('/stripe/webhook', Body), 200,
+        'a webhook is not refused by the app''s rate limit: ' + IntToStr(I));
+    end;
+  finally
+    RateLimit.Off;
+    C.Free;
+    Plugin.Free;
+    R.Free;
+  end;
+end;
+
 procedure FailingListener(E: TEvent);
 begin
   raise Exception.Create('the listener failed');
@@ -1038,6 +1091,7 @@ begin
   Test('a late webhook: the row''s own times answer', @TestLateWebhook);
   Test('a failure rolls back, and the retry applies', @TestWebhookRollsBack);
   Test('RequireSubscribed, for each kind of client', @TestRequireSubscribed);
+  Test('the webhook is outside the app''s rate limit', @TestWebhookOutsideTheRateLimit);
   Test('payments', @TestWebhookPayments);
   Test('a customer nobody here has', @TestWebhookUnknownCustomer);
   Group('stripe-mock');
