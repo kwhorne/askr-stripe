@@ -71,8 +71,12 @@ docker run --rm --network "$NET" \
   -e STRIPE_MOCK_URL="http://$MOCK:12111" \
   -v "$ASKR":/askr:ro -v "$HERE":/plugin -w /plugin "$IMAGE" sh -c "
     mkdir -p .build/units .build/bin &&
+    python3 tools/docs-code.py || exit 3
     fpc $FLAGS tests/stripe_tests.lpr > .build/fpc.log 2>&1 || {
       grep -E 'Error|Fatal' .build/fpc.log; exit 3; }
+    fpc $FLAGS examples/docs.lpr > .build/fpc-docs.log 2>&1 || {
+      echo 'The code in docs/ does not compile (examples/docs.lpr):'
+      grep -E 'Error|Fatal' .build/fpc-docs.log; exit 3; }
     for i in 1 2 3 4 5 6 7 8 9 10; do
       (exec 3<>/dev/tcp/$MOCK/12111) 2>/dev/null && break; sleep 0.5; done 2>/dev/null
     .build/bin/stripe_tests"

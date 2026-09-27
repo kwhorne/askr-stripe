@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0
+
+Documentation to build billing on, in the shape Laravel Cashier's has:
+getting started, customers, subscriptions, payments, webhooks, the Stripe
+API and testing, each with the code an app writes. The code on every page
+is compiled by `./check`, from `examples/docs.lpr`, and a line on a page
+that is not in that file stops the check -- so a page cannot show a
+function that does not exist.
+
+### Added
+
+- `RequireSubscribed(Price, PricingPath)`: a paid page asks for itself,
+  in the shape of `RequireVerified` -- a 303 to the pricing page for a
+  browser, Inertia's 409 for an Inertia visit, a 402 for a JSON client.
+  Unlike `RequireVerified` it refuses somebody who is not signed in too,
+  so a forgotten `RequireAuth` does not give a paid page away.
+- `TCheckout.Extra`: any parameter Checkout takes, in Stripe's names --
+  a trial without a card is
+  `C.Extra.Add('payment_method_collection', 'if_required')`.
+- `TStripeSubscription.ItemIds`, beside `Prices`: Stripe changes an item
+  by its `si_...` id, which is what changing a plan through the API needs.
+- `TStripeParams.Append`.
+
 ## 0.1.0
 
 The first release.

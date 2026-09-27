@@ -19,10 +19,24 @@ Result := Redirect(CheckoutUrl(Askr.Auth.Id, Email,
 if Subscribed(Askr.Auth.Id, 'price_...') then ...
 ```
 
-It needs Askr 0.16 or later, the first release with plugins. The guides
-are in [`docs/`](docs), and an app's coding agent reads them for the
-version it pins through `askr mcp`, as `stripe/billing.md` and
-`stripe/webhooks.md`.
+It needs Askr 0.16 or later, the first release with plugins.
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started](docs/billing.md) | Install, configure, and sell a subscription and a product end to end |
+| [Customers](docs/customers.md) | A Stripe customer per user, and the billing portal |
+| [Subscriptions](docs/subscriptions.md) | Checkout, trials, checking status, paid pages, cancelling and resuming |
+| [Payments](docs/payments.md) | One-off payments, failed payments, and 3-D Secure |
+| [Webhooks](docs/webhooks.md) | The endpoint, what happens to an event, order, and the events you can listen for |
+| [The Stripe API](docs/api.md) | Calling Stripe directly, errors and retries, idempotency, and the pinned version |
+| [Testing](docs/testing.md) | Testing an app's billing without Stripe, and the plugin's own checks |
+
+The same pages are on [askrcode.com](https://askrcode.com/plugins/stripe),
+and an app's coding agent reads them through `askr mcp`, for the version
+the app pins, as `stripe/billing.md` and so on. The code on every page is
+compiled by `./check`.
 
 ## What it is held to
 

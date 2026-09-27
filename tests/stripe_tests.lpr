@@ -23,7 +23,8 @@ uses
 {$ENDIF}
   SysUtils, Classes, StrUtils, Sockets, BaseUnix, Askr.Core.Arena,
   Askr.Core.Text, Askr.Core.Clock, Askr.Core.Crypto, Askr.Core.Log,
-  Askr.Http.Router, Askr.Http.Response, Askr.Urd.Driver, Askr.Urd.Model,
+  Askr.Http.Router, Askr.Http.Request, Askr.Http.Response, Askr.Auth,
+  Askr.Urd.Driver, Askr.Urd.Model,
   Askr.Urd.Sqlite, Askr.Norn.Migration, Askr.Events, Askr.Testing,
   Askr.Plugin.Stripe, Askr.Plugin.Stripe.Client,
   Askr.Plugin.Stripe.Signature, Askr.Plugin.Stripe.Billing,
@@ -554,6 +555,7 @@ begin
     'https://shop.example/no');
   C.TrialDays := 14;
   C.IdempotencyKey := 'checkout-7-1';
+  C.Extra.Add('payment_method_collection', 'if_required');
   Url := CheckoutUrl('7', 'ada@example.com', C);
   AssertEqual(Url, 'https://checkout.stripe.com/c/pay/cs_1', 'the url to send them to');
   AssertEqual(GFake.SentCount, 1, 'the customer was there already');
@@ -567,6 +569,8 @@ begin
   AssertContains(F, 'subscription_data%5Bmetadata%5D%5Baskr_user_id%5D=7',
     'the user on the subscription too');
   AssertEqual(GFake.Last.IdempotencyKey, 'checkout-7-1', 'the caller''s key');
+  AssertTrue(EndsStr('&payment_method_collection=if_required', F),
+    'what Extra holds goes along, last');
 
   C := PaymentCheckout('price_book', 3, 'https://shop.example/ok', '');
   C.TrialDays := 7;
@@ -621,6 +625,8 @@ begin
   AssertTrue(FindSubscription('7', S), 'the subscription is found');
   AssertEqual(S.Price, 'price_pro', 'the first item''s price');
   AssertEqual(Length(S.Prices), 2, 'both prices');
+  AssertEqual(S.ItemIds[1], 'si_sub_1_1', 'and each item''s id, beside its price');
+  AssertEqual(S.Prices[1], 'price_seats', 'in the same order');
   AssertTrue(S.CurrentPeriodEnd > UnixNow, 'the period end, read off the item');
   AssertEqual(EventsDispatched(TStripeSubscriptionCreated), 1, 'Created, once');
   AssertEqual(EventsDispatched(TStripeEventReceived), 1, 'and the event itself');
@@ -755,6 +761,73 @@ begin
       AssertEqual(E.Type_, 'config', 'refused before Stripe is asked');
   end;
   AssertEqual(GFake.SentCount, 0, 'nothing sent');
+end;
+
+type
+  TPaidPage = class
+    class function Show(Req: TRequest): TResponse;
+  end;
+
+class function TPaidPage.Show(Req: TRequest): TResponse;
+begin
+  if Req.Header('X-User').Len > 0 then
+    LoginForRequest(Req.Header('X-User').ToString);
+  Result := RequireSubscribed('price_pro', '/pricing');
+  if Result <> nil then
+    Exit;
+  Result := RespondText('the paid page');
+end;
+
+function Visit(const User: string; const Accept: string = '';
+  Inertia: Boolean = False): TResponse;
+var
+  C: TTestClient;
+  R: TRouter;
+begin
+  R := TRouter.Create;
+  C := TTestClient.Create(R);
+  try
+    R.Get('/paid', TPaidPage.Show);
+    if User <> '' then
+      C.WithHeader('X-User', User);
+    if Accept <> '' then
+      C.WithHeader('Accept', Accept);
+    if Inertia then
+      C.WithHeader('X-Inertia', 'true');
+    Result := C.Get('/paid');
+  finally
+    C.Free;
+    R.Free;
+  end;
+end;
+
+procedure TestRequireSubscribed;
+var
+  R: TResponse;
+begin
+  Fresh;
+  Customer('7', 'cus_A');
+  Customer('8', 'cus_B');
+  FakeEvents([]);
+  Deliver(Event('evt_1', 'customer.subscription.created', UnixNow,
+    Sub('sub_1', 'active', ['price_pro'], 0, UnixNow + 3600, False)));
+  Deliver(Event('evt_2', 'customer.subscription.created', UnixNow,
+    Sub('sub_2', 'active', ['price_basic'], 0, UnixNow + 3600, False, 'cus_B')));
+
+  R := Visit('7');
+  AssertStatus(R, 200, 'a subscriber gets the page');
+  AssertEqual(R.Body.ToString, 'the paid page', 'the page itself');
+
+  R := Visit('8');
+  AssertStatus(R, 303, 'a subscriber to another price is sent on');
+  AssertEqual(R.HeaderValue('Location'), '/pricing', 'to the pricing page');
+  AssertStatus(Visit(''), 303,
+    'nobody signed in is refused too: a forgotten RequireAuth must not ' +
+    'open a paid page');
+  AssertStatus(Visit('9', 'application/json'), 402, 'a JSON client gets a 402');
+  R := Visit('9', '', True);
+  AssertStatus(R, 409, 'an Inertia visit gets Inertia''s 409');
+  AssertEqual(R.HeaderValue('X-Inertia-Location'), '/pricing', 'with the location');
 end;
 
 procedure FailingListener(E: TEvent);
@@ -905,6 +978,7 @@ begin
     'https://shop.example/no');
   Ck.TrialDays := 14;
   Ck.AllowPromotionCodes := True;
+  Ck.Extra.Add('payment_method_collection', 'if_required');
   AssertTrue(Pos('https://', CheckoutUrl('7', '', Ck)) = 1,
     'a subscription checkout it accepts');
   Ck := PaymentCheckout('price_book', 2, 'https://shop.example/ok',
@@ -963,6 +1037,7 @@ begin
   Test('trial, grace and the end', @TestWebhookTrialGraceCancel);
   Test('a late webhook: the row''s own times answer', @TestLateWebhook);
   Test('a failure rolls back, and the retry applies', @TestWebhookRollsBack);
+  Test('RequireSubscribed, for each kind of client', @TestRequireSubscribed);
   Test('payments', @TestWebhookPayments);
   Test('a customer nobody here has', @TestWebhookUnknownCustomer);
   Group('stripe-mock');

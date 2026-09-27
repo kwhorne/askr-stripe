@@ -79,6 +79,8 @@ type
     procedure Add(const Key, Value: string); overload;
     procedure Add(const Key: string; Value: Int64); overload;
     procedure AddBool(const Key: string; Value: Boolean);
+    { Every field of Other, after these. }
+    procedure Append(const Other: TStripeParams);
     function Count: Integer;
     function Value(const Key: string): string;
     { key=value&key=value, both sides percent-encoded. Stripe reads
@@ -212,6 +214,14 @@ begin
     Add(Key, 'true')
   else
     Add(Key, 'false');
+end;
+
+procedure TStripeParams.Append(const Other: TStripeParams);
+var
+  I: Integer;
+begin
+  for I := 0 to High(Other.FKeys) do
+    Add(Other.FKeys[I], Other.FValues[I]);
 end;
 
 function TStripeParams.Count: Integer;

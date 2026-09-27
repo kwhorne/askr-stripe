@@ -29,7 +29,7 @@ uses
   SysUtils,
   Askr.Core.Text, Askr.Core.Config, Askr.Core.Clock, Askr.Core.Log,
   Askr.Http.Router, Askr.Http.Request, Askr.Http.Response, Askr.Csrf,
-  Askr.Urd.Model, Askr.Plugins,
+  Askr.Urd.Model, Askr.Plugins, Askr.Auth,
   Askr.Plugin.Stripe.Client, Askr.Plugin.Stripe.Signature,
   Askr.Plugin.Stripe.Billing;
 
@@ -44,6 +44,22 @@ type
 { The route's handler, exposed so a test can drive it through a router of
   its own. }
 function StripeWebhook(Req: TRequest): TResponse;
+
+{ For a handler behind a subscription. nil when the signed-in user has a
+  valid one -- to Price, when a price is given -- and otherwise the answer
+  to give: a 402 problem document to a JSON client, Inertia's own 409 with
+  X-Inertia-Location to an Inertia visit, and a 303 to PricingPath for a
+  browser.
+
+      R := RequireSubscribed('price_...');
+      if R <> nil then Exit(R);
+
+  The shape of RequireVerified, with one difference: nobody signed in is
+  refused here too. RequireVerified leaves that to RequireAuth; a paid page
+  that opened because someone forgot RequireAuth is a paid page given
+  away. }
+function RequireSubscribed(const Price: string = '';
+  const PricingPath: string = '/pricing'): TResponse;
 
 { What Configure read. For a test, and for a page that wants to show
   whether billing is set up -- never the secrets themselves. }
@@ -73,6 +89,27 @@ procedure SetStripeWebhookSecret(const Secret: string; Tolerance: Int64);
 begin
   GWebhookSecret := Secret;
   GTolerance := Tolerance;
+end;
+
+function RequireSubscribed(const Price, PricingPath: string): TResponse;
+var
+  Req: TRequest;
+begin
+  { Nobody signed in has the id '', and no subscription row does: one
+    without a user is refused where it is written. So this is the check
+    for that case too. }
+  if Subscribed(Askr.Auth.Id, Price) then
+    Exit(nil);
+  Req := CurrentRequest;
+  if (Req <> nil) and Req.AcceptsJson then
+    Exit(Problem(402, 'A subscription is required.'));
+  if (Req <> nil) and (Req.Header('X-Inertia').Len > 0) then
+  begin
+    Result := RespondText('', 409);
+    Result.WithHeader('X-Inertia-Location', PricingPath);
+    Exit;
+  end;
+  Result := Redirect(PricingPath, 303);
 end;
 
 function TStripePlugin.Name: string;

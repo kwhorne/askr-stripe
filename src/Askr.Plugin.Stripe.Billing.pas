@@ -44,9 +44,11 @@ type
     UserId: string;
     Customer: string;
     Status: string;
-    { The first item's price. Prices has every item's. }
+    { The first item's price. Prices has every item's, and ItemIds their
+      si_... ids, in the same order: Stripe changes an item by its id. }
     Price: string;
     Prices: TStringArray;
+    ItemIds: TStringArray;
     Quantity: Integer;
     { Unix seconds, as Stripe writes them; 0 when there is none. }
     TrialEnd: Int64;
@@ -76,6 +78,11 @@ type
     AllowPromotionCodes: Boolean;
     { For a retry that must not make a second session. }
     IdempotencyKey: string;
+    { Anything else Checkout takes, in Stripe's own names, sent after the
+      fields above: C.Extra.Add('payment_method_collection', 'if_required').
+      Checkout has dozens of parameters; a field for each here would be a
+      second copy of Stripe's reference that is always behind it. }
+    Extra: TStripeParams;
     procedure Add(const Price: string; Quantity: Integer = 1);
   end;
 
@@ -476,6 +483,7 @@ begin
   else if C.TrialDays > 0 then
     raise EStripeError.Create(0, 'config', '', '', '', '',
       'A trial belongs to a subscription, not to a payment.', False);
+  P.Append(C.Extra);
 
   Reply := Stripe.Post('/v1/checkout/sessions', P, C.IdempotencyKey);
   Result := StripeField(Reply, 'url');
@@ -512,16 +520,21 @@ var
   I: Integer;
 begin
   S.Prices := nil;
+  S.ItemIds := nil;
   A := TArena.Create(4096);
   try
-    R := Db.ExecParams(A, 'SELECT price FROM stripe_subscription_items ' +
+    R := Db.ExecParams(A, 'SELECT price, stripe_id FROM stripe_subscription_items ' +
       'WHERE subscription = ' + Ph(Db, A, 1) + ' ORDER BY id',
       [DbParam(A, S.StripeId)]);
     if R = nil then
       Exit;
     SetLength(S.Prices, R.RowCount);
+    SetLength(S.ItemIds, R.RowCount);
     for I := 0 to R.RowCount - 1 do
+    begin
       S.Prices[I] := R.Value(I, 0).ToString;
+      S.ItemIds[I] := R.Value(I, 1).ToString;
+    end;
   finally
     A.Free;
   end;

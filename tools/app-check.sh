@@ -38,6 +38,9 @@ fi
 # touched. If the framework checkout does not meet the manifest's range --
 # main between releases -- the copy says "*" and this line says so, rather
 # than the build refusing for a reason that is not the plugin's.
+# The copy is tagged as what its manifest says it is: plugin add refuses a
+# tag whose manifest says otherwise.
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$HERE/askr-plugin.toml")
 have=$(grep -Eo "AskrVersion *= *'[^']+'" "$ASKR/src/core/Askr.Core.Version.pas" | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
 want=$(grep -E '^askr *=' "$HERE/askr-plugin.toml" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
 relax=""
@@ -48,7 +51,7 @@ fi
 
 out=$(in_box "mkdir -p askr-stripe && cp -r /plugin/askr-plugin.toml /plugin/src \
     /plugin/database /plugin/docs askr-stripe/ && $relax
-  (cd askr-stripe && git init -q && $gitc add -A && $gitc commit -qm s && git tag v0.1.0) &&
+  (cd askr-stripe && git init -q && $gitc add -A && $gitc commit -qm s && git tag v$version) &&
   $askr_bin new shop --auth" 2>&1) || true
 if [ ! -f "$HERE/$ws/shop/askr.toml" ]; then
   bad "a new --auth app" "$(echo "$out" | tail -4)"
@@ -65,7 +68,7 @@ for try in 1 2 3; do
   [ $same -eq 1 ] && break
   sleep 1
   in_box "cd askr-stripe && rm -rf src database docs && cp -r /plugin/src /plugin/database /plugin/docs . &&
-    $gitc add -A && $gitc commit -qm again && git tag -f v0.1.0 >/dev/null" > /dev/null 2>&1
+    $gitc add -A && $gitc commit -qm again && git tag -f v$version >/dev/null" > /dev/null 2>&1
 done
 [ $same -eq 1 ] || { bad "the plugin is copied whole" "the container keeps seeing old file sizes"; exit 1; }
 sed -i.bak 's|^version = .*|path = "/askr"|; s|^path = .*|path = "/askr"|' "$HERE/$ws/shop/askr.toml"
@@ -76,13 +79,17 @@ ok "a new --auth app"
 
 code=0; in_box "$askr_bin plugin add file:///plugin/$ws/askr-stripe" shop > "$HERE/$ws/add.log" 2>&1 || code=$?
 if [ $code -eq 0 ] && grep -q '^\[plugins.stripe\]' "$HERE/$ws/shop/askr.toml"; then
-  ok "askr plugin add, from a tag"
+  ok "askr plugin add, from the tag v$version"
 else
+  # Everything after this would test an app without the plugin, and some
+  # of it would pass: the app builds fine without it.
   bad "askr plugin add" "$(tail -4 "$HERE/$ws/add.log")"
+  exit 1
 fi
 
-if in_box "$askr_bin build" shop > "$HERE/$ws/build.log" 2>&1; then
-  ok "the app builds with the plugin"
+if in_box "$askr_bin build" shop > "$HERE/$ws/build.log" 2>&1 &&
+   grep -q 'Askr.Plugin.Stripe' "$HERE/$ws/shop/.build/plugins/App.Plugins.pas" 2>/dev/null; then
+  ok "the app builds with the plugin compiled in"
 else
   bad "the app builds" "$(grep -E 'rror|Fatal|askr:' "$HERE/$ws/build.log" | head -8)"
   exit 1
